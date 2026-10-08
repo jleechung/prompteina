@@ -1,0 +1,46 @@
+# PDB all-chains plus AFDB, with feature clusters, one beta-annealing cycle
+# and alignment grounding.
+# Single cosine cycle for short align stages (10-15 ep).
+# Alignment grounding covers compactness, contact_order, sheet_topology,
+# internal_symmetry and the cath_* properties (secondary structure within domain).
+# Metadata is filtered for RNA/DNA and Ca-only chains: 780K entries, from 787K.
+# Clusters take CATH from facts rather than sampled_facts, with binned strata.
+# Requires the caption index: monomers.csv.{blob,offsets.pkl},
+# built by scripts/data_acquisition/build_caption_index.py
+
+datamodule:
+  _target_: proteinfoundation.datasets.structure_data.StructureDataModule
+  metadata_file: ${oc.env:DATA_PATH}/manifests/monomers.parquet
+  base_dir: ${oc.env:DATA_PATH}
+  batch_size: 16
+  num_workers: 16
+  train_split: 0.99
+  path_column: path
+  id_column: example_id
+  pin_memory: true
+  sampling_mode: cluster-random
+  cluster_tsv_path: ${oc.env:DATA_PATH}/clusters/feature_clusters/clusters_L9.tsv
+  strata_tsv_path: ${oc.env:DATA_PATH}/clusters/feature_clusters/cluster_strata_L9.tsv
+  beta_max: 1.0
+  beta_n_cycles: 1
+
+  atomarray_transforms:
+    - _target_: proteinfoundation.datasets.transforms.SelectChainTransform
+    - _target_: proteinfoundation.datasets.transforms.FilterProteinOnlyTransform
+
+  atom37_transforms:
+    - _target_: proteinfoundation.datasets.transforms.CoordsToNanometers
+    - _target_: proteinfoundation.datasets.transforms.GlobalRotationTransform
+    - _target_: proteinfoundation.datasets.transforms.ChainBreakPerResidueTransform
+    - _target_: proteinfoundation.datasets.transforms.OpenFoldFrameTransform
+    - _target_: proteinfoundation.datasets.transforms.CenteringTransform
+    - _target_: proteinfoundation.datasets.transforms.AddTextFromCSV
+      csv_path: ${oc.env:DATA_PATH}/captions/monomers.csv
+      accession_column: accession
+      text_column: description
+      use_replicates: true
+      load_alignments: true
+      alignments_column: alignments_json
+      modelled_positions_column: modelled_positions
+      mmap_index: true
+    - _target_: proteinfoundation.datasets.transforms.ResolveTextGrounding

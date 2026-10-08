@@ -1,0 +1,4 @@
+accession,description,nres_min,nres_max
+up_down_bundle,"A compact mainly alpha protein with an up-down bundle architecture formed by four helices.",80,95
+two_domain_protein,"A compact two-domain protein with an N-terminal alpha-beta two-layer sandwich and a C-terminal four-helix up-down bundle joined by a short flexible linker.",190,230
+six_blade_propeller,"A mainly beta protein with a six-bladed propeller architecture and six-fold internal symmetry.",240,280

@@ -1,0 +1,25 @@
+# @package _global_
+# Enables text conditioning.
+# Compose with text_features/ and freeze/ config groups.
+text_cond:
+  enabled: true
+  p_uncond: 0.20
+  projector_hidden_dim: 1024
+  # Set true to move the ~32GB of frozen Qwen weights back to CPU after
+  # encoding each batch. Trades a host transfer for GPU memory.
+  offload_text_encoders: false
+
+  pooled_path:
+    enabled: true
+    model:
+      kind: embedding
+      model_name: Qwen/Qwen3-Embedding-8B
+      backend: sentence_transformers
+      instruct_task: "Given a description of a protein, embed it based on semantic meaning only. Ignore surface form variation such as casing, punctuation, paraphrasing or rewording."
+
+  token_path:
+    enabled: true
+    layer_mode: average
+    model:
+      model_name: Qwen/Qwen3-8B
+      use_chat_template: true

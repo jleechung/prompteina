@@ -1,0 +1,3 @@
+# @package _global_
+nn:
+  use_text_cross_attn_gate: true

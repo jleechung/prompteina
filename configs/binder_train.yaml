@@ -1,0 +1,54 @@
+# Binder training: the fourth stage, continuing on dimers.
+#
+# Complete training config — all hyperparameters are set here.
+# Launch scripts should only set: pretrain_ckpt_path, autoencoder_ckpt_path,
+# hardware.*, hydra.run.dir, run_name, and deployment-dependent batch/accum.
+#
+# Usage:
+#   python -m proteinfoundation.train --config-name binder_train \
+#       pretrain_ckpt_path=/path/to/s4_c3_ep3.ckpt \
+#       autoencoder_ckpt_path=/path/to/ae.ckpt \
+#       hydra.run.dir=/path/to/output \
+#       run_name=binder
+#
+# Smoke test (add):
+#   +opt.limit_train_batches=10 opt.max_epochs=1
+
+defaults:
+  - training_local_latents   # base config
+  - override nn: local_latents_score_nn_160M_binder_text
+  - override branch: text
+  - override dataset: unified/dimers_text
+  - override freeze: full
+  - override noise: uniform
+  - override cross_attn_gate: enabled
+  - override alignment_head: disabled
+  - _self_
+
+# ── Training ─────────────────────────────────────────────────────────────────
+opt:
+  lr: 0.00018
+  max_epochs: 300
+  accumulate_grad_batches: 8           # adjusted per-GPU-count in launch script
+  warmup_steps: 750
+  dist_strategy: ddp_find_unused_parameters_true
+  val_check_interval: 5000000          # effectively disabled
+
+# ── Cross-attention gate ─────────────────────────────────────────────────────
+nn:
+  text_cross_attn_output_scale_mode: none
+
+# ── Logging & checkpointing ──────────────────────────────────────────────────
+log:
+  wandb_project: prompteina
+  log_every_n_steps: 10
+  # Rolling resume checkpoint every epoch; named checkpoints every 5 epochs.
+  # With checkpoint_every_n_epochs > 0, train.py uses epoch-based checkpointing
+  # and ignores inherited step-based checkpoint intervals.
+  last_ckpt_every_n_epochs: 1
+  checkpoint_every_n_epochs: 5
+
+# ── Data ─────────────────────────────────────────────────────────────────────
+dataset:
+  datamodule:
+    sampler_seed: 47

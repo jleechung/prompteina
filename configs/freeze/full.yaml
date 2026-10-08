@@ -1,0 +1,9 @@
+# @package _global_
+# Stage 2: everything trainable (joint fine-tuning).
+# Load from Stage 1 checkpoint via pretrain_ckpt_path.
+training:
+  freeze:
+    denoiser: false
+    adaln_layers: false
+    cross_attn: false
+    projectors: false

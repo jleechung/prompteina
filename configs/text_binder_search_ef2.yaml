@@ -1,0 +1,167 @@
+# Text-conditioned binder design with inference-time search, scored by
+# ESMFold2-Fast with ipSAE_min as the reward.
+#
+# This is text_binder_search.yaml with the AlphaFold2 reward replaced. The AF2
+# path needs ColabDesign, AF2 parameters (CC BY-NC 4.0) and an MSA-free initial
+# guess; this one needs none of them -- ESMFold2-Fast folds the complex from
+# sequence alone. ipSAE_min is the binding proxy the paper reports.
+#
+# Reward sign: ipSAE_min is higher-is-better and is returned as total_reward
+# directly, unlike the AF2 reward, which returns a negatively weighted iPAE.
+#
+# Cost. One fold per candidate, called serially, with the ~24GB ESM-C encoder
+# resident alongside the generative model. beam-search at beam_width 4 and
+# n_branch 4 over 5 checkpoints is 80 folds per sample. Start with best-of-n.
+# A 24GB card cannot hold the encoder and the generative model together.
+#
+# Set HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 once the weights are cached:
+# ESMFold2 resolves its ESM-C encoder by name without pinning a revision, and
+# an online re-resolve silently swaps the encoder.
+#
+# Usage:
+#   CKPT_PATH=<dir> CKPT_NAME=<ckpt> AE_CKPT=<ae.ckpt> TEXTCOND_CSV=<prompts.csv> \
+#   DATA_PATH=./assets HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+#     python -m proteinfoundation.generate --config-name text_binder_search_ef2 \
+#         generation.task_name=02_PDL1
+
+defaults:
+  - /targets/targets_dict@generation
+  - /targets/campaign_targets_dict@generation
+  - pipeline/base_gen_data@generation
+  - pipeline/model_sampling@generation
+  - _self_
+
+run_name: text_binder_search_ef2
+# Where samples are written. generate.py falls back to
+# ./inference/<config name> when this is null. Declared here because
+# the config is a struct, so `root_path=...` is rejected otherwise.
+root_path: null
+
+seed: 5
+ckpt_path: ${oc.env:CKPT_PATH}
+ckpt_name: ${oc.env:CKPT_NAME,last-EMA.ckpt}
+autoencoder_ckpt_path: ${oc.env:AE_CKPT}
+
+text_cond:
+  enabled: true
+
+generation:
+  task_name: 02_PDL1
+
+  args:
+    guidance_w: 1.0
+    nsteps: 400
+
+  dataloader:
+    batch_size: 4
+    dataset:
+      task_name: ${...task_name}
+      nres: null
+      nrepeat_per_sample: 1
+      conditional_features:
+        # Text first — populates nres from CSV rows
+        - _target_: proteinfoundation.datasets.gen_dataset.TextPromptFeature
+          csv_path: ${oc.env:TEXTCOND_CSV}
+          nres_min: ${.....target_dict_cfg.${...task_name}.binder_length[0]}
+          nres_max: ${.....target_dict_cfg.${...task_name}.binder_length[1]}
+          nres_seed: 42
+        # Target second — uses nres for binder sizing
+        - _target_: proteinfoundation.datasets.gen_dataset.TargetFeatures
+          task_name: ${...task_name}
+          binder_gen_only: True
+          pdb_path: ${oc.select:.....target_dict_cfg.${.task_name}.target_path,${oc.env:DATA_PATH}/target_data/${.....target_dict_cfg.${.task_name}.source}/${.....target_dict_cfg.${.task_name}.target_filename}.pdb}
+          input_spec: ${.....target_dict_cfg.${.task_name}.target_input}
+          target_hotspots: ${.....target_dict_cfg.${.task_name}.hotspot_residues}
+          # Per-design epitopes. The expansion agent writes a `hotspot_residues`
+          # column into the same CSV TextPromptFeature reads for `nres`; when
+          # present it OVERRIDES the dict-level target_hotspots above, per design.
+          # WITHOUT these two keys per_design_hotspots stays None
+          # (gen_dataset.py:600-603) and every design falls back to the ONE
+          # dict-level set -- which is `[]` for all 20 BoltzProt targets, i.e. an
+          # all-zero hotspot mask and no epitope conditioning at all. That is what
+          # happened to campaign_v3 (found 2026-08-22): 200 designs, hotspot
+          # recall 0.135, every design within ~6 A of the same site.
+          # A CSV without the column still yields None, so older arms reproduce.
+          csv_path: ${oc.env:TEXTCOND_CSV}
+          hotspot_column: hotspot_residues
+          binder_center: null
+          pdb_id: ${.....target_dict_cfg.${.task_name}.pdb_id}
+      transforms:
+        - _target_: proteinfoundation.datasets.transforms.CoordsTensorCenteringTransform
+          tensor_name: "x_target"
+          mask_name: "target_mask"
+          data_mode: "all-atom"
+
+  # ===========================================================================
+  # Search algorithm (from pipeline/binder/binder_generate.yaml)
+  # ===========================================================================
+  search:
+    algorithm: best-of-n  # single-pass, best-of-n, beam-search, fk-steering, mcts
+    max_batch_size: ${..dataloader.batch_size}
+    reward_threshold: null
+    step_checkpoints: [0, 100, 200, 300, 400]
+    best_of_n:
+      replicas: 4
+    beam_search:
+      n_branch: 4
+      beam_width: 4
+      keep_lookahead_samples: true
+      save_intermediate_states: false
+      guidance_schedule: null  # per-segment guidance_w list; null = use global guidance_w
+      debug_determinism: false  # log checksums at each beam step for reproducibility testing
+    fk_steering:
+      n_branch: 4
+      beam_width: 4
+      temperature: 0.1
+      keep_lookahead_samples: true
+      guidance_schedule: null
+    mcts:
+      n_simulations: 20
+      exploration_prob: 0.5
+      exploration_constant: 1.0
+      keep_lookahead_samples: true
+
+  # ===========================================================================
+  # Refinement (disabled — pure generative + search, no hallucination refine)
+  # ===========================================================================
+  refinement:
+    algorithm: null
+    refine_targets: final
+    save_pre_refinement: none
+
+  # ===========================================================================
+  # Post-generation filtering
+  # ===========================================================================
+  filter:
+    filter_samples_limit: 1000
+    delete_non_top_n_samples: false
+    dedup_sequence: true
+    reward_threshold: null
+
+  # ===========================================================================
+  # Reward model — AF2 multimer interface PAE (lower iPAE = higher reward).
+  # use_initial_guess=True matches paper / fixed-iPAE eval methodology.
+  # ===========================================================================
+  reward_model:
+    _target_: "proteinfoundation.rewards.base_reward.CompositeRewardModel"
+    reward_models:
+      esmfold2:
+        _target_: "proteinfoundation.rewards.esmfold2_reward.ESMFold2Reward"
+        model: esmfold2-fast
+        num_loops: 3
+        num_sampling_steps: 50
+        seed: 0
+        pae_cutoff: 10.0
+        dist_cutoff: 15.0
+        # 'reference' is the vendored DunbrackLab script, which is what
+        # the paper reports. 'inprocess' avoids a subprocess per
+        # candidate; next to a fold that cost is small.
+        implementation: reference
+        device: cuda
+        # A failed fold scores 0.0, the floor of ipSAE, so it ranks last
+        # without being mistaken for a negative result.
+        failure_reward: 0.0
+
+hydra:
+  run:
+    dir: ./logs/hydra_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

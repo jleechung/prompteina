@@ -1,0 +1,10 @@
+defaults:
+  - local_latents_score_nn_160M_binder
+
+# Add text pooled embedding to AdaLN conditioning
+feats_cond_seq: ["time_emb_bb_ca", "time_emb_local_latents", "text_cond"]
+
+# Cross-attention for token path
+use_text_cross_attn: true
+text_cross_attn_layer_interval: 1
+text_cross_attn_output_scale_mode: adaln_zero

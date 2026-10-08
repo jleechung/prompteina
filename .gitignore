@@ -1,0 +1,54 @@
+# This file was modified by the Prompteina authors in 2026.
+# Changes are licensed under Apache 2.0; see LICENSE and NOTICE.
+
+# Python
+__pycache__/
+*.py[cod]
+**.egg-info
+.pytest_cache/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Environment. build_uv_env.sh creates both of these in the project root.
+.venv/
+.uv-cache/
+.env
+env.sh
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Run outputs. Hydra writes outputs/ and multirun/; generate writes to
+# root_path, which defaults to ./inference.
+outputs/
+**/outputs/
+multirun/
+logs/
+.logs/
+lightning_logs/
+wandb/
+/inference
+/results*
+/samples
+/store
+
+# Weights and large artifacts
+*.ckpt
+*.pt
+*.npy
+*.pkl
+/ckpts
+/checkpoints
+community_models/ckpts/*
+/ProteinMPNN/ca_model_weights/*.pt
+/ProteinMPNN/vanilla_model_weights/*.pt
+
+# Data. $DATA_PATH is set by the user and lives outside the repo.
+/data
+*.fasta
+
+# Structures, except the target structures that are part of the release.
+*.pdb
+!assets/target_data/**/*.pdb

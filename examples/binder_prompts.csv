@@ -1,0 +1,4 @@
+accession,description,nres_min,nres_max,hotspot_residues
+pdl1_001,"A compact mainly alpha binder with a four-helix up-down bundle, a densely packed core and a flat hydrophobic protein-protein interface surrounded by polar contacts.",80,100,"A37 A39 A49 A98"
+pdl1_002,"A compact four-helix bundle with two antiparallel helical hairpins, a stable hydrophobic core and a broad shallow-concave mixed hydrophobic and polar interface.",80,100,"A37 A39 A49 A98"
+pdl1_003,"A compact all-alpha binder with three long helices packed against one short helix, a dense core and a flat interface with a central hydrophobic patch and polar edges.",75,95,"A37 A39 A49 A98"

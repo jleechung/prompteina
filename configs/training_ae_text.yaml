@@ -1,0 +1,203 @@
+# Fine-tune the AE DECODER with pooled text conditioning. Everything else frozen.
+#
+# Schema is la-proteina's `configs/training_ae.yaml` (archived at
+# the upstream la-proteina autoencoder), which is what
+# `partial_autoencoder/train.py` expects -- complexa's AE trainer came from
+# there. RFD4-Proteina-Text has a training_ae.yaml too, but it has diverged
+# (33 residue types, its own dataloaders/callbacks, muon) and its schema does
+# NOT match this trainer.
+#
+# WHY THIS EXISTS
+# ---------------
+# The denoiser is text-conditioned; the decoder is not, and the decoder is what
+# picks residue identity (`aatype_max`, argmax over its own logits). CA is
+# overwritten with the denoiser's input at decoder.py:161, so the decoder cannot
+# move the backbone -- it only chooses sidechains. Sidechain-mediated properties
+# are therefore unreachable from text today, which is what we measured:
+#
+#   requested interface residues -> realised  slope 0.934  (backbone: works)
+#   requested H-bonds -> realised, at fixed requested size  +0.028
+#                                        permutation null  [-0.111, +0.104]
+#
+# HEADROOM, AND ITS CEILING
+# -------------------------
+# 75.5% of realised H-bond variance is explained by (target, realised interface
+# size) -- backbone, which a frozen denoiser pins. 24.5% remains at fixed
+# backbone size (median SD 3.23 bonds). That residual is the most the decoder
+# could ever exploit, and it is an UPPER bound: some of it is backbone geometry
+# at fixed residue count, which the decoder also cannot touch.
+#
+# START THE FINE-TUNE AS AN EXACT NO-OP
+# -------------------------------------
+# With the stock config the decoder's `feats_cond_seq` is None, so FeatureFactory
+# takes its `ret_zero` path: the conditioning vector is zeros and `linear_out`
+# does not exist in the checkpoint at all. Adding "text_cond" creates
+# `linear_out` fresh. Zero-init it (see zero_init_cond_proj below) and c stays
+# zero at step 0, so the decoder reproduces the pretrained one bit-for-bit and
+# any change is attributable to training rather than to re-initialization.
+
+run_name_: ae_text_decoder_ft
+run_name: ae_text_decoder_ft   # train.py reads cfg_exp.run_name (no trailing underscore)
+seed: 42
+
+hardware:
+  ncpus_per_task_train_: 24
+  ncpus_per_task_prepro_: 32
+  accelerator: gpu
+  ngpus_per_node_: 1
+  nnodes_: 1
+
+defaults:
+  - nn_ae: nn_130m_text                            # decoder gets both text paths
+  # The SAME text-encoder spec the denoiser uses, so the decoder is trained on
+  # byte-identical codes to the ones it gets at inference.
+  #
+  # NOT `branch@text_cond: text` -- branch/text.yaml is `# @package _global_`
+  # and declares `text_cond:` itself, so the @-form nests it to
+  # text_cond.text_cond. TextEncoder then finds no pooled_path/token_path and
+  # returns None for BOTH representations, which surfaces much later as
+  # "batch has no 'text_tokens'".
+  - branch: text
+  - dataset: unified/dimers_text   # the captions ep379 was trained on
+  - _self_
+
+# Fine-tune, do not train from scratch. Point this at the SAME AE checkpoint the
+# reported checkpoints consume ($AE_CKPT), or the decoder no longer matches the
+# latents the frozen denoiser emits.
+pretrain_ckpt_path: ${oc.env:AE_CKPT}
+
+# Two full beta cycles across the 4 epochs above. The dataset default is 5
+# cycles over the binder stage's 100-epoch denoiser run (20 epochs/cycle); at this fine-tune's
+# length that would never complete even a fraction of one cycle.
+dataset:
+  datamodule:
+    beta_n_cycles: 2
+
+# ep379 -- the reported denoiser. Its TRAINED pooled_proj/tokens_proj are what
+# produce text_cond/text_tokens at generation time, so the decoder must be
+# trained against those exact weights. They are loaded FROZEN; only the decoder
+# trains. Verified present: the probe recovered the H-bond request from this
+# projector's output at leave-one-out R^2 = 0.823.
+text_encoder_ckpt_path: ${oc.env:DENOISER_CKPT}
+
+# Train the DECODER only. The encoder must stay frozen: it defines the latent
+# the frozen denoiser was trained to produce, so touching it invalidates ep379.
+freeze:
+  encoder: true
+  decoder: false
+zero_init_cond_proj: true   # near-no-op start; see _apply_ae_finetune_options
+
+# LATENT DROPOUT -- without this the fine-tune cannot learn anything.
+# The encoder sees the ground-truth structure and emits a latent from which
+# residue identity is recovered at 100% accuracy -- the 8D latent space
+# perfectly separates residue identities. The caption is a lossy function
+# of that same structure,
+# so given (CA, z) the text is STRICTLY REDUNDANT: I(text ; target | CA, z) ~ 0.
+# A redundant input has no gradient pressure and the text path stays at its
+# initialization forever, which looks exactly like "text conditioning does not
+# help" while actually being "text was never given a job".
+#
+# Randomly masking the latent forces the decoder to fall back on text for the
+# residues whose latent was dropped, which is the only way text acquires
+# predictive value during AE training. p is per-residue.
+latent_dropout_p: 0.5
+
+# CFG dropout on the decoder's text, mirroring the denoiser's p_uncond=0.20.
+# Without it the decoder has no unconditional mode and cannot compose with the
+# guidance weight the denoiser is sampled at (CFG 2.0 for the reported runs).
+text_p_uncond: 0.20
+
+loss:
+  kl:
+    weight: 1e-4
+    anneal: false
+    patience: 10000
+  struct:
+    type: l2
+    weight: 1.0
+  # The sequence head is the one that matters here: it is the path from text to
+  # residue identity to H-bonds. Left at the pretraining weight so the
+  # structure/sequence balance is unchanged and the comparison stays clean.
+  seq:
+    weight: 1.0
+
+force_precision_f32: False   # bf16-mixed
+
+opt:
+  lr: 0.00001               # 10x below la-proteina's 1e-4: this is a fine-tune of a
+                            # converged decoder, not pretraining
+  # TEXT BRANCH LEARNS 100x FASTER THAN THE REST.
+  # At a uniform 1e-5 the first run (job 295735, 40k steps) left the
+  # cross-attention at |w| = 3.1e-04 off a zero init. Measured effect: the
+  # decoded binder moved 0.023 A, no residue identity flipped, and the
+  # size-conditioned H-bond slope was +0.028 -- identical to the untuned
+  # baseline. So the branch was wired correctly and simply too small to matter.
+  # Only the text parameters are accelerated; the converged decoder around them
+  # stays at 1e-5 so the fine-tune still cannot damage it.
+  text_lr_mult: 100
+  # BETA ANNEALING ONLY WORKS IF WE ACTUALLY TRAVERSE THE SCHEDULE.
+  # beta is EPOCH-indexed: beta(t) = beta_max * 0.5 * (1 - cos(2*pi*t*n_cycles))
+  # with t = epoch / total_epochs, and total_epochs comes from max_epochs.
+  #
+  # Measured on this dataset at 2 GPUs: ~25k steps per epoch (job 295735 rolled
+  # from epoch 0 to epoch 1 between step 20k and 30k), and ~40k steps per 3h.
+  # So a run covers a handful of epochs, not hundreds. With the binder stage's 100-epoch /
+  # 5-cycle schedule, t would stay near 0 and beta would sit at ~0 for the whole
+  # fine-tune -- which is the uniform sampling we were accidentally getting.
+  #
+  # 4 epochs x 2 cycles puts the peaks at epochs 1 and 3, so the run sees beta
+  # sweep 0 -> 1.0 -> 0 twice instead of never leaving 0. Higher cycle frequency
+  # than binder training (2 ep/cycle vs 20) is the deliberate trade for a short fine-tune.
+  max_epochs: 4
+  accumulate_grad_batches: 1
+  skip_nan_grad: False
+  # OFF. Two full loops over every parameter per step, and _count_nan_grad does
+  # a .item() per tensor -- ~1000 GPU->CPU syncs every step. Pure diagnostics,
+  # nothing in this experiment reads it, and it is the callback rank 0 was
+  # sitting in when job 295862 hung at step 55. NOT proven to be the cause (the
+  # runs that worked had it on too), but it is expensive and one less variable.
+  grad_and_weight_analysis: False
+  dist_strategy: ddp
+  # NOTHING interrupts training except checkpointing.
+  # AE validation runs the full training_step and then writes PDBs from rank 0
+  # only, which desyncs the DDP ranks: rank 0 drops to 0% GPU doing CPU/GPFS
+  # work while rank 1 spins at 100% inside an NCCL collective and the job hangs
+  # at RUNNING forever. Job 295705 died exactly this way on reaching step 5000.
+  # The fine-tune is judged by the OFFLINE H-bond factorial, so AE
+  # reconstruction validation buys nothing here.
+  # limit_val_batches: 0 is what disables validation, and it is sufficient on
+  # its own -- leave val_check_interval at a normal value.
+  #
+  # RESUMING THIS RUN IS BROKEN, SEPARATELY FROM VALIDATION. Restarting with
+  # ckpt_path=<last-vN.ckpt> restores the sampler's mid-epoch position, and the
+  # train loader then dies before step 1 with
+  #   sampler.py: return self._sampler_list[index]
+  #   IndexError: list index out of range
+  # Reproduced on jobs 295727 and 295728; a fresh launch with the identical
+  # config (295731) steps fine. Until that is fixed, relaunch FRESH rather than
+  # pointing RUN_DIR at an existing store -- a resume looks like it is working
+  # (setup lines print, "Last checkpoint" resolves) and then dies in the loader.
+  limit_val_batches: 0
+  val_check_interval: 5000
+  skip_large_grad_updates:
+    use: False
+    moving_avg_size: 100
+    factor_threshold: 10
+    min_opt_steps: 1500
+
+# train.py requires every one of these; the la-proteina template is the source.
+# Omitting any of run_name / seed / ema.decay / log.checkpoint /
+# log.checkpoint_every_n_steps / log.last_ckpt_every_n_steps crashes at launch.
+ema:
+  decay: 0.999
+  validate_original_weights: False
+  every_n_steps: 1
+  cpu_offload: False
+
+log:
+  wandb_project: prompteina-ae
+  log_wandb: True
+  log_every_n_steps: 1
+  checkpoint: True
+  checkpoint_every_n_steps: 10000
+  last_ckpt_every_n_steps: 1500

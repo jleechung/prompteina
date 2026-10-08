@@ -1,0 +1,19 @@
+# @package _global_
+# Default noise schedule — matches upstream Complexa / la-proteina pretraining.
+# bb_ca: Beta(1.9, 1.0) skewed toward t≈1 (clean data).
+# local_latents: Beta(1.0, 1.5) skewed toward t≈0.4 (noisier).
+
+loss:
+  loss_weight_max: null
+  t_distribution:
+    bb_ca:
+      name: mix_unif_beta
+      p1: 1.9
+      p2: 1.0
+      p3: 0.02
+    local_latents:
+      name: mix_unif_beta
+      p1: 1.0
+      p2: 1.5
+      p3: 0.02
+    shared_groups:

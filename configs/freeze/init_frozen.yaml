@@ -1,0 +1,9 @@
+# @package _global_
+# Stage 1: denoiser fully frozen, projectors + cross-attn trainable.
+# Use for initial projector warmup before joint fine-tuning.
+training:
+  freeze:
+    denoiser: true
+    adaln_layers: true    # frozen (part of denoiser)
+    cross_attn: false     # trainable
+    projectors: false     # trainable

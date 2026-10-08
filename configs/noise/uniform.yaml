@@ -1,0 +1,19 @@
+# @package _global_
+# Uniform noise schedule — used by la-proteina for all text conditioning experiments.
+# bb_ca: Beta(1.0, 1.0) = uniform [0,1].
+# Gives equal weight to all timesteps, preventing near-clean bias.
+
+loss:
+  loss_weight_max: null
+  t_distribution:
+    bb_ca:
+      name: mix_unif_beta
+      p1: 1.0
+      p2: 1.0
+      p3: 0.02
+    local_latents:
+      name: mix_unif_beta
+      p1: 1.0
+      p2: 1.5
+      p3: 0.02
+    shared_groups:

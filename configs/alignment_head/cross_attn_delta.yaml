@@ -1,0 +1,9 @@
+# @package _global_
+# Multiscale: learned softmax-weighted mix of per-layer cross-attn outputs.
+# Text-dependent by construction (deltas come from Q(protein)@K(text)@V(text)).
+# Requires collect_cross_attn_deltas=True (set automatically).
+alignment_head:
+  enabled: true
+  source_type: cross_attn_delta
+  loss_weight: 0.1
+  timestep_power: 0

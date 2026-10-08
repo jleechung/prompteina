@@ -1,0 +1,14 @@
+# @package _global_
+# Cell C3: Layer-restricted V/Out-only (late layers 9-13).
+# Same as Cell A but only unfreezes V/out in the last 5 cross-attn layers.
+# Tests whether count information is layer-local (late refinement).
+training:
+  freeze:
+    denoiser: true
+    adaln_layers: true
+    cross_attn: false
+    cross_attn_qk: true
+    cross_attn_layers: [9, 10, 11, 12, 13]
+    gates: true
+    projectors: false
+    alignment_head: false

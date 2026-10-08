@@ -1,0 +1,190 @@
+Prompteina
+Copyright 2026 The Prompteina Authors
+
+This product includes software developed by NVIDIA Corporation.
+
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+
+
+================================================================================
+Derivation
+================================================================================
+
+Prompteina builds on NVIDIA Proteina-Complexa
+(https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa, commit aa64cc0f89).
+
+Modified upstream files are marked as required by Apache License 2.0 section
+4(b).
+
+
+================================================================================
+Licenses
+================================================================================
+
+Code                       Apache License 2.0              licenses/license_code.txt
+Model weights              NVIDIA Open Model License       licenses/license_weights.txt
+Data assets                CC BY 4.0                       licenses/license_datasets.txt
+Third-party code and docs  BSD 3-Clause / MIT / Apache 2.0 licenses/license_third_party.txt
+
+NVIDIA Trustworthy AI terms:
+https://www.nvidia.com/en-us/agreements/trustworthy-ai/terms/
+
+
+================================================================================
+Apache 2.0 attributions
+================================================================================
+
+Portions of this software are:
+
+  Copyright (c) 2020, 2021, 2022, 2024 NVIDIA CORPORATION & AFFILIATES.
+      All rights reserved.
+  Copyright 2021 DeepMind Technologies Limited
+  Copyright 2021, 2022 AlQuraishi Laboratory
+  Copyright 2021 Levinthal Limited
+  Copyright (c) 2023 Gray Lab
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+these files except in compliance with the License. You may obtain a copy of the
+License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+
+================================================================================
+BSD 3-Clause documentation attribution
+================================================================================
+
+RFdiffusion3 / RosettaCommons Foundry documentation
+    Copyright (c) 2025, Institute for Protein Design, University of Washington
+    Source: https://github.com/RosettaCommons/foundry
+    License: BSD 3-Clause
+    Used in: src/proteinfoundation/agent/method_refs/rfd3.SKILL.md
+
+
+================================================================================
+MIT attributions
+================================================================================
+
+ProteinMPNN (community_models/ProteinMPNN/)
+    Copyright (c) 2022 Justas Dauparas
+
+IPSAE (community_models/IPSAE/)
+    Copyright (c) 2025 Lab of Dr. Roland Dunbrack
+    Vendored unmodified from https://github.com/DunbrackLab/IPSAE at
+    commit 6174cf9. See community_models/IPSAE/LICENSE.
+
+protein-docking (src/proteinfoundation/utils/align_utils.py)
+    Copyright (c) 2022 MattMcPartlon
+
+alphafold3-pytorch
+    Copyright (c) Phil Wang
+
+BoltzGen documentation
+    Copyright (c) 2025 Hannes Stärk
+    Source: https://github.com/HannesStark/boltzgen
+    License: MIT
+    Used in: src/proteinfoundation/agent/method_refs/boltzgen.SKILL.md
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+Data assets (CC BY 4.0)
+================================================================================
+
+Most of assets/target_data/ is redistributed from NVIDIA Proteina-Complexa
+under the Creative Commons Attribution 4.0 International Public License
+(licenses/license_datasets.txt,
+https://creativecommons.org/licenses/by/4.0/legalcode).
+
+    Creator:  NVIDIA Corporation
+    Source:   https://github.com/NVIDIA-Digital-Bio/Proteina-Complexa
+    License:  CC BY 4.0
+    Modified: these are benchmark target structures that NVIDIA cropped,
+              repacked or otherwise modified from their Protein Data Bank
+              originals. The Prompteina authors redistribute the individual
+              files unchanged, but ship a subset: the AME input structures and
+              the ligand targets are omitted because this release does not
+              support those tasks, and the upstream dataset ID manifests
+              formerly under assets/data/ are omitted because nothing in this
+              repository reads them. All of it remains available from the
+              upstream repository.
+    Warranty: Unless otherwise separately undertaken by the Licensor, to the
+              extent possible, the Licensor offers the Licensed Material as-is
+              and as-available, and makes no representations or warranties of
+              any kind concerning the Licensed Material.
+
+assets/target_data/campaign_targets/GM2A_antigen.pdb is not from upstream. The
+Prompteina authors prepared it for the prospective design campaign reported in
+the paper from the AlphaFold Protein Structure Database prediction for UniProt
+P17900. They converted the prediction to PDB format and retained mature-chain
+residues 32--193.
+
+    Creator:    Google DeepMind
+    Distributor: EMBL's European Bioinformatics Institute (EMBL-EBI)
+    Source:     https://alphafold.ebi.ac.uk/entry/P17900
+    Copyright:  AlphaFold Data Copyright (2022) DeepMind Technologies Limited
+    License:    Creative Commons Attribution 4.0 International
+                https://creativecommons.org/licenses/by/4.0/
+    Modified:   converted to PDB format and cropped to residues 32--193 by the
+                Prompteina authors
+
+The file carries this attribution in its PDB remarks, and
+configs/targets/campaign_targets_dict.yaml records its provenance. The
+AlphaFold Protein Structure Database asks users to credit EMBL-EBI and cite
+Jumper et al., Nature (2021), and the AlphaFold Protein Structure Database.
+
+The underlying records come from the Protein Data Bank, the AlphaFold Protein
+Structure Database and TED, each of which carries its own upstream terms that
+this grant does not override.
+
+
+================================================================================
+Third-party weights fetched at runtime
+================================================================================
+
+  Qwen3-8B, Qwen3-Embedding-8B, Qwen3-235B-A22B   Apache 2.0, Alibaba Cloud
+  Proteina-Complexa base and autoencoder weights  NVIDIA Open Model License
+  AlphaFold2 parameters                           CC BY 4.0, Google DeepMind
+  AlphaFold 3 parameters                          AlphaFold 3 Model Parameters
+                                                  Terms of Use, Google DeepMind
+                                                  and Isomorphic Labs
+                                                  (NON-COMMERCIAL; obtain
+                                                  directly from Google; do not
+                                                  redistribute)
+  ESMFold2 / ESMFold2-Fast and ESMC-6B            MIT, Chan Zuckerberg Biohub;
+                                                  Biohub Acceptable Use Policy
+                                                  also applies
+  RoseTTAFold3 / Foundry                          BSD 3-Clause, Institute for
+                                                  Protein Design, UW
+
+AlphaFold 3 terms:
+https://github.com/google-deepmind/alphafold3/blob/main/WEIGHTS_TERMS_OF_USE.md
+https://github.com/google-deepmind/alphafold3/blob/main/OUTPUT_TERMS_OF_USE.md
+
+ESMFold2 and ESMC terms:
+https://huggingface.co/biohub/ESMFold2-Fast
+https://huggingface.co/biohub/ESMFold2
+https://huggingface.co/biohub/ESMC-6B
+https://biohub.org/acceptable-use-policy/

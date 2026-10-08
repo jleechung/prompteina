@@ -1,0 +1,32 @@
+# GM2A, the target of the prospective wet-lab campaign reported in the paper.
+#
+# Kept separate from targets_dict.yaml on purpose. That file holds the 20
+# benchmark targets, cropped to single domains; this one holds the exact
+# molecule that went into the well, verified residue by residue against the
+# catalogue item at identity 1.0000.
+#
+# `.pdb`, never a `.cif` beside it. The coordinates are identical, but the
+# loader reads mmCIF `label_seq_id`, so a .cif arrives renumbered 1..N and the
+# target_input and hotspots below would address the wrong residue -- off by 31
+# for GM2A. Silently.
+#
+# hotspot_residues is empty: epitope selection is a separate step, and the
+# campaign left it to the expansion agent, which writes a per-design
+# hotspot_residues column. binder_length is the house default for comparable
+# targets, not a value chosen for this campaign.
+
+target_dict_cfg:
+  av_GM2A:
+    source: campaign_targets
+    target_filename: GM2A_antigen
+    target_path: ./assets/target_data/campaign_targets/GM2A_antigen.pdb
+    target_input: A32-193
+    hotspot_residues: []
+    binder_length: [50, 120]
+    pdb_id: null
+    # Antigen: Sino 13246-H08B, Met1-Ile193, insect cells, C-His.
+    # Mature chain 32-193. Source AlphaFold DB P17900 -- exact match, 162/162.
+    # https://alphafold.ebi.ac.uk/entry/P17900 (CC BY 4.0; Google DeepMind,
+    # distributed by EMBL-EBI). Full attribution appears in NOTICE and the PDB.
+    # Chosen over 1G13, which leaves residues 69 and 117 unmodeled (AlphaFold
+    # places them at pLDDT 98 and 93).

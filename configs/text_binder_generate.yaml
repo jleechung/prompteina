@@ -1,0 +1,85 @@
+# Text+target binder generation.
+#
+# Combines TextPromptFeature (text conditioning) with TargetFeatures (target
+# structure conditioning) for text-guided binder design.
+#
+# Usage:
+#   CONFIG_NAME=text_binder_generate \
+#   CKPT_PATH=/path/to/checkpoint \
+#   TEXTCOND_CSV=/path/to/prompts.csv \
+#   sbatch scripts/generate.slurm
+#
+# Override target at submit time:
+#   EXTRA_OVERRIDES="generation.task_name=02_PDL1"
+#
+# Required env vars:
+#   CKPT_PATH     - Directory containing the model checkpoint
+#   AE_CKPT       - Autoencoder checkpoint path
+#   TEXTCOND_CSV  - CSV with text prompts (columns: accession, description, nres_min, nres_max)
+#
+# Notes:
+#   - TextPromptFeature runs first, populating nres from CSV rows
+#   - TargetFeatures runs second, using those lengths for binder sizing
+#   - CSV nres_min/nres_max should be clipped to target binder_length range
+
+defaults:
+  - /targets/targets_dict@generation
+  - /targets/campaign_targets_dict@generation
+  - pipeline/base_gen_data@generation
+  - pipeline/model_sampling@generation
+  - _self_
+
+# Where samples are written. generate.py falls back to
+# ./inference/<config name> when this is null. Declared here because
+# the config is a struct, so `root_path=...` is rejected otherwise.
+root_path: null
+
+seed: 5
+ckpt_path: ${oc.env:CKPT_PATH}
+ckpt_name: ${oc.env:CKPT_NAME,last-EMA.ckpt}
+autoencoder_ckpt_path: ${oc.env:AE_CKPT}
+
+text_cond:
+  enabled: true
+
+generation:
+  task_name: 02_PDL1
+
+  args:
+    guidance_w: 1.0
+    nsteps: 400
+
+  dataloader:
+    batch_size: 8
+    dataset:
+      task_name: ${...task_name}
+      nres: null
+      nrepeat_per_sample: 1
+      conditional_features:
+        # Text first — populates nres from CSV
+        - _target_: proteinfoundation.datasets.gen_dataset.TextPromptFeature
+          csv_path: ${oc.env:TEXTCOND_CSV}
+          nres_min: ${.....target_dict_cfg.${...task_name}.binder_length[0]}
+          nres_max: ${.....target_dict_cfg.${...task_name}.binder_length[1]}
+          nres_seed: 42
+        # Target second — uses nres for binder sizing
+        - _target_: proteinfoundation.datasets.gen_dataset.TargetFeatures
+          task_name: ${...task_name}
+          binder_gen_only: True
+          pdb_path: ${oc.select:.....target_dict_cfg.${.task_name}.target_path,${oc.env:DATA_PATH}/target_data/${.....target_dict_cfg.${.task_name}.source}/${.....target_dict_cfg.${.task_name}.target_filename}.pdb}
+          input_spec: ${.....target_dict_cfg.${.task_name}.target_input}
+          target_hotspots: ${.....target_dict_cfg.${.task_name}.hotspot_residues}
+          # Per-design epitopes. The agent writes a `hotspot_residues` column into
+          # the same CSV TextPromptFeature reads for `nres`; when present it
+          # OVERRIDES the dict-level target_hotspots above, per design. A CSV
+          # without that column yields None and the dict path is unchanged, so
+          # every published arm still reproduces byte-identically.
+          csv_path: ${oc.env:TEXTCOND_CSV}
+          hotspot_column: hotspot_residues
+          binder_center: null
+          pdb_id: ${.....target_dict_cfg.${.task_name}.pdb_id}
+      transforms:
+        - _target_: proteinfoundation.datasets.transforms.CoordsTensorCenteringTransform
+          tensor_name: "x_target"
+          mask_name: "target_mask"
+          data_mode: "all-atom"

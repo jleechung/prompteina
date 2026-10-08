@@ -1,0 +1,49 @@
+# Text-conditioned monomer generation.
+#
+# Usage:
+#   python -m proteinfoundation.generate --config-name text_monomer_generate \
+#       root_path=/path/to/output
+#
+# Required env vars:
+#   CKPT_PATH     - Directory containing the model checkpoint
+#   AE_CKPT       - Autoencoder checkpoint path
+#   TEXTCOND_CSV  - CSV with text prompts (must have 'description' column)
+#
+# Optional env var:
+#   CKPT_NAME     - Checkpoint filename (default: last-EMA.ckpt)
+
+defaults:
+  - pipeline/base_gen_data@generation
+  - pipeline/model_sampling@generation
+  - _self_
+
+# Where samples are written. generate.py falls back to
+# ./inference/<config name> when this is null. Declared here because
+# the config is a struct, so `root_path=...` is rejected otherwise.
+root_path: null
+
+seed: 5
+ckpt_path: ${oc.env:CKPT_PATH}
+ckpt_name: ${oc.env:CKPT_NAME,last-EMA.ckpt}
+autoencoder_ckpt_path: ${oc.env:AE_CKPT}
+
+# Needed for CFG validity check in generate.py.
+# Full text_cond config is restored from the checkpoint hparams.
+text_cond:
+  enabled: true
+
+generation:
+  args:
+    guidance_w: 1.0   # Match la-proteina default (1.0 = no CFG, no doubled forward passes)
+    nsteps: 400
+  dataloader:
+    batch_size: 8
+    dataset:
+      nres: null       # populated by TextPromptFeature from CSV
+      nrepeat_per_sample: 50
+      conditional_features:
+        - _target_: proteinfoundation.datasets.gen_dataset.TextPromptFeature
+          csv_path: ${oc.env:TEXTCOND_CSV}
+          nres_min: 100
+          nres_max: 500
+          vary_length_per_repeat: true

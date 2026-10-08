@@ -1,0 +1,187 @@
+# Text-conditioned binder generation WITH inference-time search.
+#
+# Combines:
+#   - TextPromptFeature (text conditioning, CFG via guidance_w) + TargetFeatures
+#     (target structure conditioning) — same dataloader as text_binder_generate.
+#   - Best-of-N / beam / FK / MCTS search with an AF2-multimer i_pae reward —
+#     same search + reward as pipeline/binder/binder_generate.
+#
+# This is the config used to test whether ipAE-reward search (a) recovers binding
+# success for text-conditioned checkpoints and (b) preserves text-following
+# (interface H-bond / residue count tracking) through the search.
+#
+# Required env vars:
+#   CKPT_PATH     - Directory containing the model checkpoint
+#   CKPT_NAME     - Checkpoint filename (e.g. last-EMA.ckpt)
+#   AE_CKPT       - Autoencoder checkpoint path
+#   TEXTCOND_CSV  - CSV with text prompts (accession, description, nres_min, nres_max)
+#   AF2_DIR       - Directory with AF2 multimer params (params_model_*_multimer_v3.npz)
+#
+# Run with the ipae_eval conda env (torch + jax 0.4.30 + colabdesign together);
+# complexa_env's JAX is incompatible with colabdesign. See launch script.
+
+defaults:
+  - /targets/targets_dict@generation
+  - pipeline/base_gen_data@generation
+  - pipeline/model_sampling@generation
+  - _self_
+
+run_name: text_binder_search
+# Where samples are written. generate.py falls back to
+# ./inference/<config name> when this is null. Declared here because
+# the config is a struct, so `root_path=...` is rejected otherwise.
+root_path: null
+
+seed: 5
+ckpt_path: ${oc.env:CKPT_PATH}
+ckpt_name: ${oc.env:CKPT_NAME,last-EMA.ckpt}
+autoencoder_ckpt_path: ${oc.env:AE_CKPT}
+
+text_cond:
+  enabled: true
+
+generation:
+  task_name: 02_PDL1
+
+  args:
+    guidance_w: 1.0
+    nsteps: 400
+
+  dataloader:
+    batch_size: 4
+    dataset:
+      task_name: ${...task_name}
+      nres: null
+      nrepeat_per_sample: 1
+      conditional_features:
+        # Text first — populates nres from CSV rows
+        - _target_: proteinfoundation.datasets.gen_dataset.TextPromptFeature
+          csv_path: ${oc.env:TEXTCOND_CSV}
+          nres_min: ${.....target_dict_cfg.${...task_name}.binder_length[0]}
+          nres_max: ${.....target_dict_cfg.${...task_name}.binder_length[1]}
+          nres_seed: 42
+        # Target second — uses nres for binder sizing
+        - _target_: proteinfoundation.datasets.gen_dataset.TargetFeatures
+          task_name: ${...task_name}
+          binder_gen_only: True
+          pdb_path: ${oc.select:.....target_dict_cfg.${.task_name}.target_path,${oc.env:DATA_PATH}/target_data/${.....target_dict_cfg.${.task_name}.source}/${.....target_dict_cfg.${.task_name}.target_filename}.pdb}
+          input_spec: ${.....target_dict_cfg.${.task_name}.target_input}
+          target_hotspots: ${.....target_dict_cfg.${.task_name}.hotspot_residues}
+          # Per-design epitopes. The expansion agent writes a `hotspot_residues`
+          # column into the same CSV TextPromptFeature reads for `nres`; when
+          # present it OVERRIDES the dict-level target_hotspots above, per design.
+          # WITHOUT these two keys per_design_hotspots stays None
+          # (gen_dataset.py:600-603) and every design falls back to the ONE
+          # dict-level set -- which is `[]` for all 20 BoltzProt targets, i.e. an
+          # all-zero hotspot mask and no epitope conditioning at all. That is what
+          # happened to campaign_v3 (found 2026-08-22): 200 designs, hotspot
+          # recall 0.135, every design within ~6 A of the same site.
+          # A CSV without the column still yields None, so older arms reproduce.
+          csv_path: ${oc.env:TEXTCOND_CSV}
+          hotspot_column: hotspot_residues
+          binder_center: null
+          pdb_id: ${.....target_dict_cfg.${.task_name}.pdb_id}
+      transforms:
+        - _target_: proteinfoundation.datasets.transforms.CoordsTensorCenteringTransform
+          tensor_name: "x_target"
+          mask_name: "target_mask"
+          data_mode: "all-atom"
+
+  # ===========================================================================
+  # Search algorithm (from pipeline/binder/binder_generate.yaml)
+  # ===========================================================================
+  search:
+    algorithm: best-of-n  # single-pass, best-of-n, beam-search, fk-steering, mcts
+    max_batch_size: ${..dataloader.batch_size}
+    reward_threshold: null
+    step_checkpoints: [0, 100, 200, 300, 400]
+    best_of_n:
+      replicas: 4
+    beam_search:
+      n_branch: 4
+      beam_width: 4
+      keep_lookahead_samples: true
+      save_intermediate_states: false
+      guidance_schedule: null  # per-segment guidance_w list; null = use global guidance_w
+      debug_determinism: false  # log checksums at each beam step for reproducibility testing
+    fk_steering:
+      n_branch: 4
+      beam_width: 4
+      temperature: 0.1
+      keep_lookahead_samples: true
+      guidance_schedule: null
+    mcts:
+      n_simulations: 20
+      exploration_prob: 0.5
+      exploration_constant: 1.0
+      keep_lookahead_samples: true
+
+  # ===========================================================================
+  # Refinement (disabled — pure generative + search, no hallucination refine)
+  # ===========================================================================
+  refinement:
+    algorithm: null
+    refine_targets: final
+    save_pre_refinement: none
+
+  # ===========================================================================
+  # Post-generation filtering
+  # ===========================================================================
+  filter:
+    filter_samples_limit: 1000
+    delete_non_top_n_samples: false
+    dedup_sequence: true
+    reward_threshold: null
+
+  # ===========================================================================
+  # Reward model — AlphaFold 3, in-process (replaces the AF2 reward).
+  #
+  # Settings mirror the AF2 reward rather than AF3's own defaults:
+  #   num_recycles=3          AF2RewardModel default is 3, AF3's is 10
+  #   num_diffusion_samples=1 AF2 runs one model (model_nums:[0]); AF3's default
+  #                           of 5 is best-of-5, which makes the reward
+  #                           optimistic rather than expected-quality
+  #
+  # AF3 IS THE HARSHER CRITIC. AF2 runs use_initial_guess=True and is handed the
+  # designed complex pose (colabdesign/af/design.py:166-167); AF3 has no initial
+  # guess and docks from noise. Counts from the two are not comparable.
+  #
+  # The column prefix is `af3folding`, deliberately NOT `af2folding`: reusing the
+  # AF2 key would let all 23 downstream parsers work untouched while the column
+  # silently lied about its source.
+  # ===========================================================================
+  reward_model:
+    _target_: "proteinfoundation.rewards.base_reward.CompositeRewardModel"
+    reward_models:
+      af3folding:
+        _target_: "proteinfoundation.rewards.alphafold3_reward.AF3RewardModel"
+        model_dir: ${oc.env:AF3_MODEL_DIR}
+        af3_src: ${oc.env:AF3_SRC}
+        num_recycles: 3
+        num_diffusion_samples: 1
+        seed: 42
+        # ipSAE is Overath's best single predictor of wet-lab success and the AF2
+        # arms record 12 ipSAE columns, so leaving it off made the two predictors
+        # non-comparable on the metric that matters most. It is NOT recoverable
+        # afterwards: it needs the predicted cif, which lives in a tmp dir deleted
+        # in a finally block, so obtaining it later means re-running all of AF3.
+        # It only adds a logged component -- the reward stays -iPAE / min_margin.
+        emit_ipsae: true
+        # 'triton' is AF3's default. Compute capability 7.x (rtx6k) additionally
+        # requires 'xla' plus XLA_FLAGS=--xla_disable_hlo_passes=custom-kernel-fusion-rewriter
+        # (run_alphafold.py:951-972).
+        flash_attention_implementation: ${oc.env:AF3_FLASH_ATTN,triton}
+        # "weighted_sum" with i_pae:-1.0 reproduces the -iPAE baseline arms and
+        # needs no thresholds at all. "min_margin" reproduces the conjunction
+        # arms and reuses the same CONJUNCTION_GATES values as AF2.
+        reward_aggregation: ${oc.env:AF3_REWARD_AGG,weighted_sum}
+        reward_weights:
+          i_pae: -1.0
+        # device_id indexes jax.devices("gpu"); constructing ModelRunner
+        # directly skips run_alphafold.main()'s device discovery, so this is the
+        # only place the GPU gets chosen.
+        device_id: 0
+
+hydra:
+  run:
+    dir: ./logs/hydra_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
